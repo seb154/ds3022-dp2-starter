@@ -102,7 +102,7 @@ def collect_messages(queue_url: str, expected: int = 21, timeout_s: int = 600) -
         """)
 
         stored = 0
-        while stored < expected:
+        while True:
             # Stop with a clear error instead of looping forever
             if time.time() - start > timeout_s:
                 raise TimeoutError(
@@ -118,9 +118,23 @@ def collect_messages(queue_url: str, expected: int = 21, timeout_s: int = 600) -
             messages = resp.get("Messages", [])  # no "Messages" key when nothing is visible
 
             for msg in messages:
-                attrs = msg["MessageAttributes"]
-                order_no = attrs["order_no"]["StringValue"]  # a string, e.g. "7"
-                word = attrs["word"]["StringValue"]
+                # .get() returns None instead of crashing when an attribute is missing
+                attrs = msg.get("MessageAttributes", {})
+                order_no = attrs.get("order_no", {}).get("StringValue")
+                word = attrs.get("word", {}).get("StringValue")
+
+                # Malformed ("poison") message: log it and delete it, but don't store it
+                if order_no is None or word is None or not order_no.isdigit():
+                    logger.warning(f"Malformed message deleted (not stored): {attrs}")
+                    sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
+                    continue  # skip to the next message
+
+                # Duplicate? Still store it (raw = exactly what arrived); dbt counts it once
+                already = con.execute(
+                    "SELECT COUNT(*) FROM raw.fragments WHERE order_no = ?", [order_no]
+                ).fetchone()[0]
+                if already > 0:
+                    logger.info(f"Duplicate of fragment {order_no} received (will be counted once)")
 
                 # 1. store it first ...
                 con.execute(
@@ -134,7 +148,12 @@ def collect_messages(queue_url: str, expected: int = 21, timeout_s: int = 600) -
             stored = con.execute(
                 "SELECT COUNT(DISTINCT order_no) FROM raw.fragments"
             ).fetchone()[0]
-            logger.info(f"Stored {stored}/{expected} fragments")
+            counts = get_counts(queue_url)
+            logger.info(f"Stored {stored}/{expected} fragments; queue counts: {counts}")
+
+            # Finished only when we have every fragment AND the queue is completely empty
+            if stored >= expected and sum(counts.values()) == 0:
+                break
 
     logger.info(f"Done collecting. Queue counts now: {get_counts(queue_url)}")
     return stored

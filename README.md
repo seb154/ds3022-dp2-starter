@@ -159,3 +159,14 @@ You may observe and rerun your pipeline as often as you like, but in the end you
 - [Prefect documentation](https://docs.prefect.io/v3/get-started)
 - [dbt-duckdb adapter](https://github.com/duckdb/dbt-duckdb) and [dbt data tests](https://docs.getdbt.com/docs/build/data-tests)
 - [Moto server mode](https://docs.getmoto.org/en/latest/docs/server_mode.html), [ElasticMQ](https://github.com/softwaremill/elasticmq)
+
+
+
+
+The main README is 25% of the grade and needs: setup and run steps, your polling strategy, the receive → store → delete order, how the dbt tests protect the result, tool roles, screenshots, your receipt code, and the "Chaos round" section.
+
+Checkpoint D:
+- PASS  cjw9zn / prefect  receipt: 79E77759D6
+
+Checkpoint F:
+- PASS  cjw9zn / prefect  receipt: 79E77759D6
