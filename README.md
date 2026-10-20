@@ -185,7 +185,7 @@ Then open `.env` and set `UVA_ID` to your computing ID.
 Open four terminals, activate the venv in each, and start them in this order:
 
 | Terminal | Command | 
-|---|---|---|
+|---|---|
 | T1 Emulator | `moto_server -p 9324` |
 | T2 Scatter API | `python kit/scatter_api.py` | 
 | T4 Prefect | `prefect server start` | 
