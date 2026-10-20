@@ -71,15 +71,15 @@ def get_counts(queue_url: str) -> dict:
 def monitor_queue(queue_url: str, poll_s: int = 5, timeout_s: int = 1200) -> dict:
     """Log the three counters every poll_s seconds until nothing is delayed; raise after timeout_s."""
     logger = get_run_logger()
-    start = time.time()  # when monitoring began
+    start = time.time()  
     while True:
         counts = get_counts(queue_url)
         logger.info(f"Queue counts: {counts}")
-        if counts["delayed"] == 0:  # nothing left waiting on a delay
+        if counts["delayed"] == 0:
             break
         if time.time() - start > timeout_s:
             raise TimeoutError(f"Timeout exceeded: {timeout_s} seconds")
-        time.sleep(poll_s)  # wait before checking again
+        time.sleep(poll_s) 
     return counts
 
 @task
@@ -87,11 +87,10 @@ def collect_messages(queue_url: str, expected: int = 21, timeout_s: int = 600) -
     """Receive, land in DuckDB, then delete. Return how many fragments are stored."""
     # TODO (Checkpoint B): MessageAttributeNames=["All"] and resp.get("Messages", [])
     logger = get_run_logger()
-    start = time.time()  # when collecting began
+    start = time.time()
 
-    # "with" opens the DuckDB file and closes it automatically at the end
+    #"with" opens the DuckDB file and closes it 
     with duckdb.connect(DUCKDB_PATH) as con:
-        # Start each run with an empty table (every POST starts a new puzzle)
         con.execute("CREATE SCHEMA IF NOT EXISTS raw")
         con.execute("""
             CREATE OR REPLACE TABLE raw.fragments (
@@ -103,7 +102,6 @@ def collect_messages(queue_url: str, expected: int = 21, timeout_s: int = 600) -
 
         stored = 0
         while True:
-            # Stop with a clear error instead of looping forever
             if time.time() - start > timeout_s:
                 raise TimeoutError(
                     f"Only {stored} of {expected} fragments arrived within {timeout_s} seconds"
@@ -111,47 +109,46 @@ def collect_messages(queue_url: str, expected: int = 21, timeout_s: int = 600) -
 
             resp = sqs.receive_message(
                 QueueUrl=queue_url,
-                MaxNumberOfMessages=10,          # SQS gives at most 10 per call
-                MessageAttributeNames=["All"],   # the data lives in the attributes
-                WaitTimeSeconds=10,              # long polling: wait up to 10 s for messages
+                MaxNumberOfMessages=10,          
+                MessageAttributeNames=["All"],   
+                WaitTimeSeconds=10,              
             )
-            messages = resp.get("Messages", [])  # no "Messages" key when nothing is visible
+            messages = resp.get("Messages", [])  
 
             for msg in messages:
-                # .get() returns None instead of crashing when an attribute is missing
                 attrs = msg.get("MessageAttributes", {})
                 order_no = attrs.get("order_no", {}).get("StringValue")
                 word = attrs.get("word", {}).get("StringValue")
 
-                # Malformed ("poison") message: log it and delete it, but don't store it
+            
                 if order_no is None or word is None or not order_no.isdigit():
                     logger.warning(f"Malformed message deleted (not stored): {attrs}")
                     sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
-                    continue  # skip to the next message
+                    continue  
 
-                # Duplicate? Still store it (raw = exactly what arrived); dbt counts it once
+                
                 already = con.execute(
                     "SELECT COUNT(*) FROM raw.fragments WHERE order_no = ?", [order_no]
                 ).fetchone()[0]
                 if already > 0:
                     logger.info(f"Duplicate of fragment {order_no} received (will be counted once)")
 
-                # 1. store it first ...
+                #store it first
                 con.execute(
                     "INSERT INTO raw.fragments VALUES (?, ?, current_timestamp)",
                     [order_no, word],
                 )
-                # 2. ... then delete it from the queue
+                #then delete it from the queue
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
 
-            # Count each order_no once, so a duplicate message is not counted twice
+            
             stored = con.execute(
                 "SELECT COUNT(DISTINCT order_no) FROM raw.fragments"
             ).fetchone()[0]
             counts = get_counts(queue_url)
             logger.info(f"Stored {stored}/{expected} fragments; queue counts: {counts}")
 
-            # Finished only when we have every fragment AND the queue is completely empty
+            
             if stored >= expected and sum(counts.values()) == 0:
                 break
 
@@ -163,14 +160,13 @@ def dbt_build() -> None:
     """Run `dbt build --project-dir dbt --profiles-dir dbt`; raise if anything fails."""
     # TODO (Checkpoint C)
     logger = get_run_logger()
-    # Run dbt exactly as you would type it in the terminal (from the repo root)
     result = subprocess.run(
         ["dbt", "build", "--project-dir", "dbt", "--profiles-dir", "dbt"],
-        capture_output=True,  # keep dbt's output so we can log it
-        text=True,            # give us the output as normal text
+        capture_output=True,  
+        text=True,            
     )
     logger.info(result.stdout)
-    # returncode 0 means success; anything else means a model or test failed
+
     if result.returncode != 0:
         raise RuntimeError("dbt build failed (see the log above). The phrase will NOT be submitted.")
     logger.info("dbt build passed: all tests OK")
@@ -190,12 +186,11 @@ def submit_solution(phrase: str, platform: str = "prefect") -> int:
     """Send to dp2-submit with uvaid / phrase / platform attributes. Return the HTTP status code."""
     # TODO (Checkpoint D)
     logger = get_run_logger()
-    # Look up the submission queue's URL by its name
     submit_url = sqs.get_queue_url(QueueName="dp2-submit")["QueueUrl"]
 
     response = sqs.send_message(
         QueueUrl=submit_url,
-        MessageBody="dp2 solution",  # the body doesn't matter; the attributes do
+        MessageBody="dp2 solution",  
         MessageAttributes={
             "uvaid":    {"DataType": "String", "StringValue": UVA_ID},
             "phrase":   {"DataType": "String", "StringValue": phrase},
@@ -203,7 +198,6 @@ def submit_solution(phrase: str, platform: str = "prefect") -> int:
         },
     )
 
-    # Every boto3 response says how the HTTP request went (200 = OK)
     status = response["ResponseMetadata"]["HTTPStatusCode"]
     logger.info(f"Submitted to dp2-submit: HTTP status {status}")
     if status != 200:
